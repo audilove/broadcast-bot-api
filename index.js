@@ -11,17 +11,28 @@ app.use(express.json())
 
 let bot
 
+// Настройка очереди для рассылок
+const broadcastQueue = new Queue('broadcastQueue', {
+    redis: {
+        host: '127.0.0.1',
+        port: 6379
+    }
+})
+
+// Настройка клиента Redis для хранения состояния
+const redisClient = new Redis()
+
 const getUserCount = async () => {
     try {
         const response = await fetch(`${config.API_URL}/broadcast/get-total-user-count`, {
-            method: 'GET',
+            method: 'POST',
             headers: {
-                'x-api-key': config.API_KEY
+                'Content-Type': 'application/json'
             }
         })
         const data = await response.json()
         if (data?.status === 'success') {
-            return data.totalUserCount
+            return data.data.totalUserCount
         } else {
             return null
         }
@@ -36,35 +47,30 @@ const getUsers = async (lastId, limit) => {
         const response = await fetch(`${config.API_URL}/broadcast/get-users`, {
             method: 'POST',
             headers: {
-                'x-api-key': config.API_KEY
+                'Content-Type': 'application/json'
             },
-            body: {
+            body: JSON.stringify({
                 lastId, limit
-            }
+            })
         })
-        const data = await response.json()
-        if (data?.status === 'success') {
-            return data.users
-        } else {
-            return []
+
+        const text = await response.text()
+
+        try {
+            const data = JSON.parse(text)
+            if (data?.status === 'success') {
+                return data.data.users  // Возвращаем массив пользователей
+            }
+        } catch (parseError) {
+            console.error('Ошибка парсинга JSON:', parseError)
         }
+
+        return []
     } catch (error) {
-        console.error('Ошибка при получении количества пользователей:', error)
+        console.error('Ошибка при получении пользователей:', error)
         return []
     }
 }
-
-
-// Настройка очереди для рассылок
-const broadcastQueue = new Queue('broadcastQueue', {
-    redis: {
-        host: '127.0.0.1',
-        port: 6379
-    }
-})
-
-// Настройка клиента Redis для хранения состояния
-const redisClient = new Redis()
 
 // Функция отправки сообщений пользователям
 async function sendMessageToUsers({ jobId, messageText, imageUrl, buttons, estimatedUserCount, reportChatId, webhookUrl, reportIntervalMinutes, testUsers, delay }) {
@@ -86,6 +92,7 @@ async function sendMessageToUsers({ jobId, messageText, imageUrl, buttons, estim
             const estimatedTimeFriendly = estimatedTime ? moment.duration(estimatedTime, 'seconds').humanize() : null
             const reportText = `
             Рассылка ID: ${jobId}
+            - Пользователей: ${estimatedUserCount}
             - Отправлено сообщений: ${messages_sent}
             - Заблокировано: ${errors}
             ${elapsedTimeFriendly ? `- Прошло времени от начала рассылки: ${elapsedTimeFriendly}` : ''}
@@ -97,6 +104,7 @@ async function sendMessageToUsers({ jobId, messageText, imageUrl, buttons, estim
                 try {
                     await axios.post(webhookUrl, {
                         jobId,
+                        estimatedUserCount,
                         messages_sent,
                         errors,
                         elapsedTimeFriendly,
@@ -147,7 +155,6 @@ async function sendMessageToUsers({ jobId, messageText, imageUrl, buttons, estim
                 users = await getUsers(last_user_id, 500)
 
                 if (!users.length) {
-                    console.error('Ошибка при получении пользователей.')
                     keepSending = false
                     await redisClient.set(`${jobId}:completed`, 1)
                     break
