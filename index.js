@@ -6,13 +6,54 @@ const Redis = require('ioredis')
 const moment = require('moment-timezone')
 const config = require('./config/config.json')
 
-const { getUserCount } = require('./utils/getUserCount') // Импортируем функцию для получения количества пользователей
-const { getUsers } = require('./utils/getUsers') // Импортируем функцию для получения пользователей
-
 const app = express()
 app.use(express.json())
 
 let bot
+
+const getUserCount = async () => {
+    try {
+        const response = await fetch(`${config.API_URL}/broadcast/get-total-user-count`, {
+            method: 'GET',
+            headers: {
+                'x-api-key': config.API_KEY
+            }
+        })
+        const data = await response.json()
+        if (data?.status === 'success') {
+            return data.totalUserCount
+        } else {
+            return null
+        }
+    } catch (error) {
+        console.error('Ошибка при получении количества пользователей:', error)
+        return null
+    }
+}
+
+const getUsers = async (lastId, limit) => {
+    try {
+        const response = await fetch(`${config.API_URL}/broadcast/get-users`, {
+            method: 'POST',
+            headers: {
+                'x-api-key': config.API_KEY
+            },
+            body: {
+                lastId, limit
+            }
+        })
+        const data = await response.json()
+        if (data?.status === 'success') {
+            return data.users
+        } else {
+            return []
+        }
+    } catch (error) {
+        console.error('Ошибка при получении количества пользователей:', error)
+        return []
+    }
+}
+
 
 // Настройка очереди для рассылок
 const broadcastQueue = new Queue('broadcastQueue', {
